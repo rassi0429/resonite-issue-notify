@@ -3,6 +3,7 @@ import axios from 'axios';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,6 +15,11 @@ class GitHubDiscordBot {
         this.checkInterval = parseInt(process.env.CHECK_INTERVAL) || 300000; // 5分
         this.repositories = process.env.REPOSITORIES?.split(',') || [];
         this.lastCheckFile = join(__dirname, 'last_check.json');
+        this.openaiApiKey = process.env.OPENAI_API_KEY;
+
+        this.openai = this.openaiApiKey
+            ? new OpenAI({ apiKey: this.openaiApiKey })
+            : null;
         
         this.githubHeaders = {
             'Accept': 'application/vnd.github.v3+json',
@@ -25,13 +31,33 @@ class GitHubDiscordBot {
         }
     }
 
+    async translateToJapanese(text) {
+        if (!this.openai) return null;
+        if (!text) return null;
+        try {
+            const completion = await this.openai.chat.completions.create({
+                model: "gpt-4-1106-preview",
+                messages: [
+                    { role: "system", content: "Translate the following text to Japanese. Output only the translation." },
+                    { role: "user", content: text }
+                ],
+                max_tokens: 1000,
+                temperature: 0.3
+            });
+            return completion.choices[0]?.message?.content?.trim() || null;
+        } catch (e) {
+            console.error('❌ OpenAI翻訳エラー:', e.message);
+            return null;
+        }
+    }
+
     async getLastCheckTimes() {
         try {
             const data = await fs.readFile(this.lastCheckFile, 'utf8');
             return JSON.parse(data);
         } catch (error) {
             // ファイルが存在しない場合は1時間前を返す
-            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+            const oneHourAgo = new Date(Date.now() - 600 * 60 * 1000).toISOString();
             const defaultTimes = {};
             this.repositories.forEach(repo => {
                 defaultTimes[repo] = {
@@ -203,6 +229,23 @@ class GitHubDiscordBot {
             const newIssues = await this.checkNewIssues(repo, repoTimes.issues);
             for (const issue of newIssues) {
                 const embed = this.createIssueEmbed(issue, repo);
+                // 日本語翻訳を追加
+                const jpTitle = await this.translateToJapanese(issue.title);
+                const jpBody = issue.body ? await this.translateToJapanese(issue.body) : null;
+                if (jpTitle || jpBody) {
+                    embed.fields.push({
+                        name: '🇯🇵 日本語タイトル',
+                        value: jpTitle || '(翻訳不可)',
+                        inline: false
+                    });
+                    if (jpBody) {
+                        embed.fields.push({
+                            name: '🇯🇵 日本語本文',
+                            value: jpBody,
+                            inline: false
+                        });
+                    }
+                }
                 await this.sendDiscordNotification(embed);
                 issueCount++;
                 console.log(`📝 Issue notification sent: #${issue.number} - ${this.truncateText(issue.title, 50)}`);
@@ -212,6 +255,15 @@ class GitHubDiscordBot {
             const newComments = await this.checkNewComments(repo, repoTimes.comments);
             for (const comment of newComments) {
                 const embed = this.createCommentEmbed(comment, repo);
+                // 日本語翻訳を追加
+                const jpBody = comment.body ? await this.translateToJapanese(comment.body) : null;
+                if (jpBody) {
+                    embed.fields.push({
+                        name: '🇯🇵 日本語コメント',
+                        value: jpBody,
+                        inline: false
+                    });
+                }
                 await this.sendDiscordNotification(embed);
                 commentCount++;
                 console.log(`💬 Comment notification sent from @${comment.user.login}`);
