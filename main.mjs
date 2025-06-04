@@ -311,7 +311,6 @@ class GitHubDiscordBot {
                     jpIssueTitle = '';
                 }
 
-                console.log(comment)
                 // comment.html_urlからissue番号を抽出
                 const issueNumber = (() => {
                     const m = comment.html_url.match(/\/issues\/(\d+)/);
