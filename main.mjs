@@ -41,7 +41,7 @@ class GitHubDiscordBot {
         if (!text) return null;
         try {
             const completion = await this.openai.chat.completions.create({
-                model: "gpt-4-1106-preview",
+                model: "gpt-4.1-mini",
                 messages: [
                     { role: "system", content: "Translate the following text to Japanese. Output only the translation." },
                     { role: "user", content: text }
@@ -62,7 +62,7 @@ class GitHubDiscordBot {
             return JSON.parse(data);
         } catch (error) {
             // ファイルが存在しない場合は1時間前を返す
-            const oneHourAgo = new Date(Date.now() - 400 * 60 * 1000).toISOString();
+            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
             const defaultTimes = {};
             this.repositories.forEach(repo => {
                 defaultTimes[repo] = {
@@ -275,7 +275,7 @@ class GitHubDiscordBot {
 
                 // Misskey用テキスト組み立て
                 let misskeyText = `【${issue.state === 'open' ? '🟢OPENED' : '🔴CLOSED'}】${jpTitle} \n ${issue.title} \n`;
-                misskeyText += `[GitHub issue #${issue.number}](${issue.html_url}) ＠${issue.user.login}\n`;
+                misskeyText += `[Issue #${issue.number}](${issue.html_url}) ＠${issue.user.login}\n`;
                 if (issue.body) misskeyText += `\n\n\n ${jpBody} \n\n\n`;
 
                 await this.sendMisskeyNotification(misskeyText);
@@ -299,14 +299,27 @@ class GitHubDiscordBot {
                 }
                 await this.sendDiscordNotification(embed);
 
-                // Misskey用テキスト組み立て
-                let misskeyText = `💬 New Comment\n@${comment.user.login} (${repo})\n`;
-                misskeyText += comment.html_url + '\n';
-                if (comment.body) misskeyText += `\n${this.truncateText(comment.body, 500)}\n`;
-                if (jpBody) {
-                    misskeyText += '\n---\n';
-                    misskeyText += `🇯🇵コメント: ${jpBody}\n`;
+                // コメントが紐づくissueのタイトルを取得
+                let issueTitle = '';
+                let jpIssueTitle = '';
+                try {
+                    const issueRes = await axios.get(comment.issue_url, { headers: this.githubHeaders });
+                    issueTitle = issueRes.data.title || '';
+                    jpIssueTitle = issueTitle ? await this.translateToJapanese(issueTitle) : '';
+                } catch (e) {
+                    issueTitle = '';
+                    jpIssueTitle = '';
                 }
+
+                console.log(comment)
+                // comment.html_urlからissue番号を抽出
+                const issueNumber = (() => {
+                    const m = comment.html_url.match(/\/issues\/(\d+)/);
+                    return m ? m[1] : '';
+                })();
+                // Misskey用テキスト組み立て
+                let misskeyText = `💬 New Comment  ${jpIssueTitle} \n [Issue #${issueNumber}](${comment.html_url}) ＠${comment.user.login} \n`;
+                if (comment.body) misskeyText += `\n${jpBody}\n\n\n`;
                 await this.sendMisskeyNotification(misskeyText);
 
                 commentCount++;
