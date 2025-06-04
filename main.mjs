@@ -17,6 +17,11 @@ class GitHubDiscordBot {
         this.lastCheckFile = join(__dirname, 'last_check.json');
         this.openaiApiKey = process.env.OPENAI_API_KEY;
 
+        // Misskey関連
+        this.misskeyInstance = process.env.MISSKEY_INSTANCE_URL;
+        this.misskeyToken = process.env.MISSKEY_TOKEN;
+        this.misskeyChannelId = process.env.MISSKEY_CHANNEL_ID;
+
         this.openai = this.openaiApiKey
             ? new OpenAI({ apiKey: this.openaiApiKey })
             : null;
@@ -57,7 +62,7 @@ class GitHubDiscordBot {
             return JSON.parse(data);
         } catch (error) {
             // ファイルが存在しない場合は1時間前を返す
-            const oneHourAgo = new Date(Date.now() - 600 * 60 * 1000).toISOString();
+            const oneHourAgo = new Date(Date.now() - 400 * 60 * 1000).toISOString();
             const defaultTimes = {};
             this.repositories.forEach(repo => {
                 defaultTimes[repo] = {
@@ -124,6 +129,26 @@ class GitHubDiscordBot {
             await this.sleep(200);
         } catch (error) {
             console.error('❌ Error sending Discord notification:', error.message);
+        }
+    }
+
+    async sendMisskeyNotification(text, options = {}) {
+        if (!this.misskeyInstance || !this.misskeyToken || !this.misskeyChannelId) {
+            // Misskey設定がなければ何もしない
+            return;
+        }
+        try {
+            const payload = {
+                i: this.misskeyToken,
+                text,
+                channelId: this.misskeyChannelId,
+                ...options
+            };
+            await axios.post(`${this.misskeyInstance}/api/notes/create`, payload);
+            // Misskey API制限対策で少し待機
+            await this.sleep(200);
+        } catch (error) {
+            console.error('❌ Error sending Misskey notification:', error.message);
         }
     }
 
@@ -247,6 +272,14 @@ class GitHubDiscordBot {
                     }
                 }
                 await this.sendDiscordNotification(embed);
+
+                // Misskey用テキスト組み立て
+                let misskeyText = `【${issue.state === 'open' ? '🟢OPENED' : '🔴CLOSED'}】${jpTitle} \n ${issue.title} \n`;
+                misskeyText += `[GitHub issue #${issue.number}](${issue.html_url}) ＠${issue.user.login}\n`;
+                if (issue.body) misskeyText += `\n\n\n ${jpBody} \n\n\n`;
+
+                await this.sendMisskeyNotification(misskeyText);
+
                 issueCount++;
                 console.log(`📝 Issue notification sent: #${issue.number} - ${this.truncateText(issue.title, 50)}`);
             }
@@ -265,6 +298,17 @@ class GitHubDiscordBot {
                     });
                 }
                 await this.sendDiscordNotification(embed);
+
+                // Misskey用テキスト組み立て
+                let misskeyText = `💬 New Comment\n@${comment.user.login} (${repo})\n`;
+                misskeyText += comment.html_url + '\n';
+                if (comment.body) misskeyText += `\n${this.truncateText(comment.body, 500)}\n`;
+                if (jpBody) {
+                    misskeyText += '\n---\n';
+                    misskeyText += `🇯🇵コメント: ${jpBody}\n`;
+                }
+                await this.sendMisskeyNotification(misskeyText);
+
                 commentCount++;
                 console.log(`💬 Comment notification sent from @${comment.user.login}`);
             }
