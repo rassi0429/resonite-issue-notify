@@ -44,6 +44,33 @@ npx nodemon main.mjs
 
 Botを起動すると、指定したリポジトリの新しいIssueやコメントがDiscordに通知されます。
 
+## Docker / docker-composeでの起動
+
+1. `.env`ファイルを用意します（上記「設定」参照）。
+2. 以下の内容で`docker-compose.yml`を作成します（例）:
+
+    ```yaml
+    version: "3"
+    services:
+      app:
+        build: .
+        env_file:
+          - .env
+        restart: unless-stopped
+    ```
+
+3. ビルド＆起動:
+
+    ```bash
+    docker-compose up --build -d
+    ```
+
+4. 停止:
+
+    ```bash
+    docker-compose down
+    ```
+
 ## ライセンス
 
 MIT
