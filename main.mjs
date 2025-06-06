@@ -56,29 +56,11 @@ class GitHubDiscordBot {
         }
     }
 
-    async getLastCheckTimes() {
-        try {
-            const data = await fs.readFile(this.lastCheckFile, 'utf8');
-            return JSON.parse(data);
-        } catch (error) {
-            // ファイルが存在しない場合は1時間前を返す
-            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-            const defaultTimes = {};
-            this.repositories.forEach(repo => {
-                defaultTimes[repo] = {
-                    issues: oneHourAgo,
-                    comments: oneHourAgo
-                };
-            });
-            return defaultTimes;
-        }
-    }
-
     async saveLastCheckTimes(times) {
         await fs.writeFile(this.lastCheckFile, JSON.stringify(times, null, 2));
     }
 
-    async checkNewIssues(repo, since) {
+    async checkNewIssuesAndClosed(repo, since) {
         try {
             const response = await axios.get(`https://api.github.com/repos/${repo}/issues`, {
                 headers: this.githubHeaders,
@@ -90,14 +72,24 @@ class GitHubDiscordBot {
                 }
             });
 
-            // プルリクエストを除外し、実際に新しく作成されたissueのみを返す
-            return response.data.filter(issue => 
-                !issue.pull_request && 
+            // 新規作成issue
+            const newIssues = response.data.filter(issue =>
+                !issue.pull_request &&
                 new Date(issue.created_at) > new Date(since)
             );
+
+            // クローズされたissue
+            const closedIssues = response.data.filter(issue =>
+                !issue.pull_request &&
+                issue.state === 'closed' &&
+                new Date(issue.updated_at) > new Date(since) &&
+                issue.updated_at !== issue.created_at
+            );
+
+            return { newIssues, closedIssues };
         } catch (error) {
             console.error(`❌ Error fetching issues for ${repo}:`, error.message);
-            return [];
+            return { newIssues: [], closedIssues: [] };
         }
     }
 
@@ -250,8 +242,8 @@ class GitHubDiscordBot {
         let commentCount = 0;
 
         try {
-            // 新しいissueをチェック
-            const newIssues = await this.checkNewIssues(repo, repoTimes.issues);
+            // 新しいissueとクローズissueをチェック
+            const { newIssues, closedIssues } = await this.checkNewIssuesAndClosed(repo, repoTimes.issues);
             for (const issue of newIssues) {
                 const embed = this.createIssueEmbed(issue, repo);
                 // 日本語翻訳を追加
@@ -274,7 +266,7 @@ class GitHubDiscordBot {
                 await this.sendDiscordNotification(embed);
 
                 // Misskey用テキスト組み立て
-                let misskeyText = `【${issue.state === 'open' ? '🟢OPENED' : '🔴CLOSED'}】${jpTitle} \n ${issue.title} \n`;
+                let misskeyText = `【🟢OPENED】${jpTitle} \n ${issue.title} \n`;
                 misskeyText += `[Issue #${issue.number}](${issue.html_url}) ＠${issue.user.login}\n`;
                 if (issue.body) misskeyText += `\n\n\n ${jpBody} \n\n\n`;
 
@@ -282,6 +274,37 @@ class GitHubDiscordBot {
 
                 issueCount++;
                 console.log(`📝 Issue notification sent: #${issue.number} - ${this.truncateText(issue.title, 50)}`);
+            }
+
+            // クローズされたissueの通知
+            for (const issue of closedIssues) {
+                const embed = this.createIssueEmbed(issue, repo);
+                const jpTitle = await this.translateToJapanese(issue.title);
+                const jpBody = issue.body ? await this.translateToJapanese(issue.body) : null;
+                if (jpTitle || jpBody) {
+                    embed.fields.push({
+                        name: '🇯🇵 日本語タイトル',
+                        value: jpTitle || '(翻訳不可)',
+                        inline: false
+                    });
+                    if (jpBody) {
+                        embed.fields.push({
+                            name: '🇯🇵 日本語本文',
+                            value: jpBody,
+                            inline: false
+                        });
+                    }
+                }
+                await this.sendDiscordNotification(embed);
+
+                let misskeyText = `【🔴CLOSED】${jpTitle} \n ${issue.title} \n`;
+                misskeyText += `[Issue #${issue.number}](${issue.html_url}) ＠${issue.user.login}\n`;
+                if (issue.body) misskeyText += `\n\n\n ${jpBody} \n\n\n`;
+
+                await this.sendMisskeyNotification(misskeyText);
+
+                issueCount++;
+                console.log(`🔴 Issue closed notification sent: #${issue.number} - ${this.truncateText(issue.title, 50)}`);
             }
 
             // 新しいコメントをチェック
