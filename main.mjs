@@ -41,7 +41,7 @@ class GitHubDiscordBot {
         if (!text) return null;
         try {
             const completion = await this.openai.chat.completions.create({
-                model: "gpt-4.1-mini",
+                model: "gpt-4o-mini",
                 messages: [
                     { role: "system", content: "Translate the following text to Japanese. Output only the translation." },
                     { role: "user", content: text }
@@ -367,6 +367,15 @@ class GitHubDiscordBot {
 
         // APIレート制限対策
         await this.sleep(1000);
+    }
+
+    async getLastCheckTimes() {
+        try {
+            const data = await fs.readFile(this.lastCheckFile, 'utf-8');
+            return JSON.parse(data);
+        } catch (error) {
+            return {};
+        }
     }
 
     async runCheck() {
