@@ -351,7 +351,7 @@ class GitHubDiscordBot {
             // 最終チェック時刻を更新
             const now = new Date().toISOString();
             lastCheckTimes[repo] = {
-                issues: newIssues.length > 0 ? now : repoTimes.issues,
+                issues: (newIssues.length > 0 || closedIssues.length > 0) ? now : repoTimes.issues,
                 comments: newComments.length > 0 ? now : repoTimes.comments
             };
 
