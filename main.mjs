@@ -342,7 +342,12 @@ class GitHubDiscordBot {
                 // Misskey用テキスト組み立て
                 let misskeyText = `💬 New Comment  ${jpIssueTitle} \n [Issue #${issueNumber}](${comment.html_url}) ＠${comment.user.login} \n`;
                 if (comment.body) misskeyText += `\n${jpBody}\n\n\n`;
-                await this.sendMisskeyNotification(misskeyText);
+
+                if(comment.user.login !== "github-actions[bot]") {
+                    await this.sendMisskeyNotification(misskeyText);
+                } else {
+                    console.log("Commented from GitHub Actions, skipped.")
+                }
 
                 commentCount++;
                 console.log(`💬 Comment notification sent from @${comment.user.login}`);
